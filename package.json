@@ -1,0 +1,13 @@
+{
+  "name": "spotify-backend",
+  "version": "3.0.0",
+  "description": "Backend per scaricare MP3 da YouTube tramite yt-dlp reale",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  }
+}
