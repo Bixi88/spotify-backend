@@ -161,6 +161,51 @@ app.get('/debug-tools', (req, res) => {
     });
 });
 
+// Endpoint diagnostico: prova SOLO yt-dlp (senza ffmpeg), scrive su /dev/null,
+// per isolare se il crash avviene già con yt-dlp da solo o solo in
+// combinazione con ffmpeg che gira in parallelo.
+app.post('/debug-ytdlp-only', (req, res) => {
+    const { videoUrl } = req.body;
+    const videoId = extractVideoId(videoUrl || '');
+    if (!videoId) return res.status(400).json({ error: 'URL non valido' });
+
+    const cleanUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    const startMem = process.memoryUsage().rss;
+    const startTime = Date.now();
+
+    const ytdlp = spawn('yt-dlp', [
+        '-f', 'bestaudio',
+        '--no-playlist',
+        '-o', '/dev/null',
+        cleanUrl,
+    ]);
+
+    let stderrBuf = '';
+    let stdoutBytes = 0;
+
+    ytdlp.stdout.on('data', (d) => { stdoutBytes += d.length; });
+    ytdlp.stderr.on('data', (d) => {
+        stderrBuf += d.toString();
+        if (stderrBuf.length > 3000) stderrBuf = stderrBuf.slice(-3000);
+    });
+
+    ytdlp.on('error', (err) => {
+        res.json({ ok: false, error: 'spawn error: ' + err.message });
+    });
+
+    ytdlp.on('close', (code, signal) => {
+        res.json({
+            ok: code === 0,
+            code,
+            signal,
+            elapsedMs: Date.now() - startTime,
+            stdoutBytesWrittenToDevNull: stdoutBytes,
+            memAtStartMB: Math.round(startMem / 1024 / 1024),
+            stderrTail: stderrBuf.slice(-1500),
+        });
+    });
+});
+
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', message: 'Server funzionante! (versione yt-dlp)' });
 });
