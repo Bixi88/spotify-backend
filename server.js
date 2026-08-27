@@ -58,7 +58,13 @@ app.post('/download', (req, res) => {
     ffmpeg.stdout.on('data', (chunk) => {
         bytesWritten += chunk.length;
     });
-    ffmpeg.stdout.pipe(res);
+    // IMPORTANTE: { end: false } impedisce a .pipe() di chiudere da solo la
+    // risposta HTTP quando lo stream di ffmpeg finisce (anche con 0 byte in
+    // caso di errore). Senza questo, .pipe() manda res.end() PRIMA che il
+    // nostro controllo su bytesWritten possa intervenire, mascherando ogni
+    // errore con una risposta 200 vuota. Chiudiamo noi la risposta a mano,
+    // solo dopo aver verificato che sia arrivato qualcosa.
+    ffmpeg.stdout.pipe(res, { end: false });
 
     ytdlp.stderr.on('data', (chunk) => {
         ytdlpStderr += chunk.toString();
@@ -99,7 +105,7 @@ app.post('/download', (req, res) => {
             failIfNothingSent(`ffmpeg non ha prodotto alcun byte (codice uscita ${code})`);
         } else if (!responded) {
             responded = true;
-            res.end();
+            res.end(); // qui chiudiamo noi la risposta, ora che sappiamo che è andata bene
         }
     });
 
