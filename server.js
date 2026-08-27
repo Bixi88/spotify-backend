@@ -81,7 +81,9 @@ app.post('/download', (req, res) => {
         responded = true;
         console.error('Download fallito:', reason, '\nyt-dlp:', ytdlpStderr, '\nffmpeg:', ffmpegStderr);
         if (!res.headersSent) {
-            res.status(500).json({
+            res.status(500)
+                .setHeader('Content-Type', 'application/json'); // sovrascrive l'audio/mpeg impostato a inizio richiesta
+            res.json({
                 error: reason,
                 ytdlpLog: ytdlpStderr.slice(-500),
                 ffmpegLog: ffmpegStderr.slice(-500),
