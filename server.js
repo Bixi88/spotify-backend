@@ -23,56 +23,91 @@ app.post('/download', (req, res) => {
 
     const cleanUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
-    // yt-dlp: scarica il miglior audio disponibile, lo converte in mp3 con ffmpeg
-    // e lo scrive direttamente sullo stdout (-o -), che noi "pipiamo" nella risposta HTTP.
+    // Pipeline in due passaggi: yt-dlp scarica l'audio grezzo e lo scrive sul
+    // suo stdout; ffmpeg lo legge dal proprio stdin e lo converte in mp3,
+    // scrivendo il risultato sul SUO stdout, che mandiamo alla risposta HTTP.
+    // (Chiedere direttamente a yt-dlp di fare extract+convert su stdout con
+    // "-x --audio-format mp3 -o -" spesso produce un file vuoto: la
+    // conversione con ffmpeg avviene su file temporaneo dopo il download
+    // completo, passaggio che si perde quando l'output è un flusso.)
+
     const ytdlp = spawn('yt-dlp', [
         '-f', 'bestaudio',
-        '--extract-audio',
-        '--audio-format', 'mp3',
-        '--audio-quality', '0', // qualità migliore disponibile
         '--no-playlist',
         '-o', '-',
         cleanUrl,
     ]);
 
+    const ffmpeg = spawn('ffmpeg', [
+        '-i', 'pipe:0',
+        '-vn',
+        '-f', 'mp3',
+        '-b:a', '192k',
+        'pipe:1',
+    ]);
+
     let responded = false;
-    let stderrBuffer = '';
+    let bytesWritten = 0;
+    let ytdlpStderr = '';
+    let ffmpegStderr = '';
 
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Content-Disposition', 'attachment; filename="song.mp3"');
 
-    ytdlp.stdout.pipe(res);
+    ytdlp.stdout.pipe(ffmpeg.stdin);
+    ffmpeg.stdout.on('data', (chunk) => {
+        bytesWritten += chunk.length;
+    });
+    ffmpeg.stdout.pipe(res);
 
     ytdlp.stderr.on('data', (chunk) => {
-        // yt-dlp scrive log/avanzamento su stderr, lo teniamo solo per debug in caso di errore
-        stderrBuffer += chunk.toString();
-        if (stderrBuffer.length > 4000) stderrBuffer = stderrBuffer.slice(-4000);
+        ytdlpStderr += chunk.toString();
+        if (ytdlpStderr.length > 4000) ytdlpStderr = ytdlpStderr.slice(-4000);
     });
 
-    ytdlp.on('error', (err) => {
-        console.error('Errore avvio yt-dlp:', err.message);
-        if (!responded && !res.headersSent) {
-            responded = true;
-            res.status(500).json({ error: 'yt-dlp non disponibile sul server: ' + err.message });
-        }
+    ffmpeg.stderr.on('data', (chunk) => {
+        ffmpegStderr += chunk.toString();
+        if (ffmpegStderr.length > 4000) ffmpegStderr = ffmpegStderr.slice(-4000);
     });
+
+    function failIfNothingSent(reason) {
+        if (responded) return;
+        responded = true;
+        console.error('Download fallito:', reason, '\nyt-dlp:', ytdlpStderr, '\nffmpeg:', ffmpegStderr);
+        if (!res.headersSent) {
+            res.status(500).json({
+                error: reason,
+                ytdlpLog: ytdlpStderr.slice(-500),
+                ffmpegLog: ffmpegStderr.slice(-500),
+            });
+        } else {
+            res.end();
+        }
+    }
+
+    ytdlp.on('error', (err) => failIfNothingSent('yt-dlp non avviabile: ' + err.message));
+    ffmpeg.on('error', (err) => failIfNothingSent('ffmpeg non avviabile: ' + err.message));
 
     ytdlp.on('close', (code) => {
-        if (code !== 0 && !responded) {
-            responded = true;
-            console.error(`yt-dlp uscito con codice ${code}. Log:`, stderrBuffer);
-            if (!res.headersSent) {
-                res.status(500).json({ error: 'yt-dlp ha fallito', detail: stderrBuffer.slice(-500) });
-            } else {
-                res.end();
-            }
+        if (code !== 0 && bytesWritten === 0) {
+            failIfNothingSent(`yt-dlp uscito con codice ${code}`);
         }
     });
 
-    // Se il client chiude la connessione (utente annulla), fermiamo yt-dlp per non sprecare risorse
+    ffmpeg.on('close', (code) => {
+        if (bytesWritten === 0) {
+            failIfNothingSent(`ffmpeg non ha prodotto alcun byte (codice uscita ${code})`);
+        } else if (!responded) {
+            responded = true;
+            res.end();
+        }
+    });
+
+    // Se il client chiude la connessione (utente annulla), fermiamo entrambi i processi
     req.on('close', () => {
         if (!res.writableEnded) {
             ytdlp.kill('SIGKILL');
+            ffmpeg.kill('SIGKILL');
         }
     });
 });
