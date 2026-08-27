@@ -96,15 +96,21 @@ app.post('/download', (req, res) => {
     ytdlp.on('error', (err) => failIfNothingSent('yt-dlp non avviabile: ' + err.message));
     ffmpeg.on('error', (err) => failIfNothingSent('ffmpeg non avviabile: ' + err.message));
 
-    ytdlp.on('close', (code) => {
+    ytdlp.on('close', (code, signal) => {
         if (code !== 0 && bytesWritten === 0) {
-            failIfNothingSent(`yt-dlp uscito con codice ${code}`);
+            const detail = signal
+                ? `yt-dlp terminato dal segnale di sistema ${signal} (probabile mancanza di memoria/OOM se SIGKILL, o crash se SIGSEGV)`
+                : `yt-dlp uscito con codice ${code}`;
+            failIfNothingSent(detail);
         }
     });
 
-    ffmpeg.on('close', (code) => {
+    ffmpeg.on('close', (code, signal) => {
         if (bytesWritten === 0) {
-            failIfNothingSent(`ffmpeg non ha prodotto alcun byte (codice uscita ${code})`);
+            const detail = signal
+                ? `ffmpeg terminato dal segnale di sistema ${signal} (probabile mancanza di memoria/OOM se SIGKILL, o crash se SIGSEGV)`
+                : `ffmpeg non ha prodotto alcun byte (codice uscita ${code})`;
+            failIfNothingSent(detail);
         } else if (!responded) {
             responded = true;
             res.end(); // qui chiudiamo noi la risposta, ora che sappiamo che è andata bene
@@ -157,6 +163,18 @@ app.get('/debug-tools', (req, res) => {
 
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', message: 'Server funzionante! (versione yt-dlp)' });
+});
+
+// Endpoint diagnostico: quanta memoria ha davvero il container in questo momento
+app.get('/debug-memory', (req, res) => {
+    const mem = process.memoryUsage();
+    const toMB = (bytes) => Math.round(bytes / 1024 / 1024) + ' MB';
+    res.json({
+        rss: toMB(mem.rss), // memoria totale usata dal processo Node
+        heapUsed: toMB(mem.heapUsed),
+        heapTotal: toMB(mem.heapTotal),
+        note: 'Se rss e\' vicino a 512 MB, il piano free di Render sta probabilmente causando OOM kill su yt-dlp/ffmpeg',
+    });
 });
 
 const PORT = process.env.PORT || 3000;
