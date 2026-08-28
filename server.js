@@ -157,8 +157,13 @@ app.post('/download', (req, res) => {
         }
     });
 
-    // Se il client chiude la connessione (utente annulla), fermiamo entrambi i processi
-    req.on('close', () => {
+    // Se il client chiude la connessione (utente annulla), fermiamo entrambi i processi.
+    // ATTENZIONE: deve essere res.on('close'), NON req.on('close') — quest'ultimo
+    // scatta quasi subito, appena il corpo della richiesta è stato letto
+    // (non solo alla disconnessione reale), e uccideva i processi dopo
+    // pochi millisecondi ad OGNI richiesta. Questo era il vero motivo dei
+    // fallimenti istantanei "SIGKILL" visti finora.
+    res.on('close', () => {
         if (!res.writableEnded) {
             ytdlp.kill('SIGKILL');
             ffmpeg.kill('SIGKILL');
