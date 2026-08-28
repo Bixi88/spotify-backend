@@ -82,7 +82,7 @@ app.post('/download', (req, res) => {
         '-i', 'pipe:0',
         '-vn',
         '-f', 'mp3',
-        '-b:a', '192k',
+        '-b:a', '320k',
         'pipe:1',
     ]);
 
@@ -256,6 +256,30 @@ app.post('/debug-ytdlp-only', (req, res) => {
 
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', message: 'Server funzionante! (versione yt-dlp)', cookiesAvailable });
+});
+
+// Permette di aggiornare i cookie da una pagina web invece che dalla dashboard
+// Render. Protetto da una password semplice (variabile d'ambiente ADMIN_SECRET
+// su Render > Environment > Environment Variables, non Secret Files).
+app.post('/api/upload-cookies', express.text({ type: '*/*', limit: '5mb' }), (req, res) => {
+    const providedSecret = req.headers['x-admin-secret'];
+    if (!process.env.ADMIN_SECRET) {
+        return res.status(500).json({ error: 'ADMIN_SECRET non configurato sul server' });
+    }
+    if (providedSecret !== process.env.ADMIN_SECRET) {
+        return res.status(401).json({ error: 'Password non corretta' });
+    }
+    if (!req.body || req.body.length < 20) {
+        return res.status(400).json({ error: 'File cookies.txt vuoto o non valido' });
+    }
+    try {
+        fs.writeFileSync(COOKIES_WRITABLE_PATH, req.body, 'utf8');
+        cookiesAvailable = true;
+        console.log('✅ cookies.txt aggiornato via /api/upload-cookies');
+        res.json({ ok: true, message: 'Cookie aggiornati con successo' });
+    } catch (err) {
+        res.status(500).json({ error: 'Errore scrittura file: ' + err.message });
+    }
 });
 
 // Endpoint diagnostico: quanta memoria ha davvero il container in questo momento
