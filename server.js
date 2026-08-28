@@ -37,6 +37,13 @@ function cookiesArgs() {
     return cookiesAvailable ? ['--cookies', COOKIES_WRITABLE_PATH] : [];
 }
 
+// yt-dlp non scarica automaticamente lo script che risolve le sfide
+// JavaScript di YouTube (serve per calcolare firme/token validi), anche con
+// deno installato: va abilitato esplicitamente per motivi di sicurezza.
+// Senza questo flag, i download falliscono con "The page needs to be
+// reloaded." o "Signature solving failed".
+const REMOTE_COMPONENTS_ARGS = ['--remote-components', 'ejs:github'];
+
 function extractVideoId(url) {
     const m = url.match(/(?:v=|youtu\.be\/|embed\/)([a-zA-Z0-9_-]{11})/);
     return m ? m[1] : null;
@@ -66,6 +73,7 @@ app.post('/download', (req, res) => {
         '-f', 'bestaudio',
         '--no-playlist',
         ...cookiesArgs(),
+        ...REMOTE_COMPONENTS_ARGS,
         '-o', '-',
         cleanUrl,
     ]);
@@ -209,6 +217,7 @@ app.post('/debug-ytdlp-only', (req, res) => {
         '-f', 'bestaudio',
         '--no-playlist',
         ...cookiesArgs(),
+        ...REMOTE_COMPONENTS_ARGS,
         '-o', '/dev/null',
         cleanUrl,
     ]);
