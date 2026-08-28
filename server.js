@@ -6,6 +6,19 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+const fs = require('fs');
+
+// Se carichi un cookies.txt su Render come Secret File in /etc/secrets/cookies.txt,
+// lo useremo per farci passare per un utente autenticato e aggirare il blocco
+// anti-bot di YouTube ("Sign in to confirm you're not a bot").
+const COOKIES_PATH = '/etc/secrets/cookies.txt';
+const cookiesAvailable = fs.existsSync(COOKIES_PATH);
+console.log(cookiesAvailable ? '✅ cookies.txt trovato, verrà usato' : '⚠️  cookies.txt non trovato, le richieste potrebbero essere bloccate da YouTube');
+
+function cookiesArgs() {
+    return cookiesAvailable ? ['--cookies', COOKIES_PATH] : [];
+}
+
 function extractVideoId(url) {
     const m = url.match(/(?:v=|youtu\.be\/|embed\/)([a-zA-Z0-9_-]{11})/);
     return m ? m[1] : null;
@@ -34,6 +47,7 @@ app.post('/download', (req, res) => {
     const ytdlp = spawn('yt-dlp', [
         '-f', 'bestaudio',
         '--no-playlist',
+        ...cookiesArgs(),
         '-o', '-',
         cleanUrl,
     ]);
@@ -176,6 +190,7 @@ app.post('/debug-ytdlp-only', (req, res) => {
     const ytdlp = spawn('yt-dlp', [
         '-f', 'bestaudio',
         '--no-playlist',
+        ...cookiesArgs(),
         '-o', '/dev/null',
         cleanUrl,
     ]);
@@ -201,13 +216,14 @@ app.post('/debug-ytdlp-only', (req, res) => {
             elapsedMs: Date.now() - startTime,
             stdoutBytesWrittenToDevNull: stdoutBytes,
             memAtStartMB: Math.round(startMem / 1024 / 1024),
+            cookiesUsed: cookiesAvailable,
             stderrTail: stderrBuf.slice(-1500),
         });
     });
 });
 
 app.get('/health', (req, res) => {
-    res.json({ status: 'ok', message: 'Server funzionante! (versione yt-dlp)' });
+    res.json({ status: 'ok', message: 'Server funzionante! (versione yt-dlp)', cookiesAvailable });
 });
 
 // Endpoint diagnostico: quanta memoria ha davvero il container in questo momento
