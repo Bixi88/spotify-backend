@@ -8,15 +8,33 @@ app.use(express.json());
 
 const fs = require('fs');
 
-// Se carichi un cookies.txt su Render come Secret File in /etc/secrets/cookies.txt,
-// lo useremo per farci passare per un utente autenticato e aggirare il blocco
-// anti-bot di YouTube ("Sign in to confirm you're not a bot").
-const COOKIES_PATH = '/etc/secrets/cookies.txt';
-const cookiesAvailable = fs.existsSync(COOKIES_PATH);
-console.log(cookiesAvailable ? '✅ cookies.txt trovato, verrà usato' : '⚠️  cookies.txt non trovato, le richieste potrebbero essere bloccate da YouTube');
+// Se carichi un cookies.txt su Render come Secret File, lo useremo per farci
+// passare per un utente autenticato e aggirare il blocco anti-bot di YouTube
+// ("Sign in to confirm you're not a bot").
+//
+// IMPORTANTE: i Secret Files di Render sono montati in sola lettura, ma
+// yt-dlp ha bisogno di RISCRIVERE il file dei cookie dopo l'uso (per
+// aggiornare token interni) — altrimenti va in crash con "Read-only file
+// system". Soluzione: copiamo il file in una posizione scrivibile (/tmp)
+// all'avvio del server, e usiamo quella copia.
+const COOKIES_SECRET_PATH = '/etc/secrets/cookies.txt';
+const COOKIES_WRITABLE_PATH = '/tmp/cookies.txt';
+
+let cookiesAvailable = false;
+try {
+    if (fs.existsSync(COOKIES_SECRET_PATH)) {
+        fs.copyFileSync(COOKIES_SECRET_PATH, COOKIES_WRITABLE_PATH);
+        cookiesAvailable = true;
+        console.log('✅ cookies.txt trovato e copiato in una posizione scrivibile, verrà usato');
+    } else {
+        console.log('⚠️  cookies.txt non trovato in /etc/secrets/, le richieste potrebbero essere bloccate da YouTube');
+    }
+} catch (err) {
+    console.error('⚠️  Errore copiando cookies.txt:', err.message);
+}
 
 function cookiesArgs() {
-    return cookiesAvailable ? ['--cookies', COOKIES_PATH] : [];
+    return cookiesAvailable ? ['--cookies', COOKIES_WRITABLE_PATH] : [];
 }
 
 function extractVideoId(url) {
